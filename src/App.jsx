@@ -23,8 +23,7 @@ function App() {
   // Input State
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [newCouponCode, setNewCouponCode] = useState('')
-  const [newCouponDiscount, setNewCouponDiscount] = useState('')
+  const [isSignUp, setIsSignUp] = useState(false) // **เพิ่มสำหรับสลับหน้าสมัครสมาชิก**
   const [slipFile, setSlipFile] = useState(null)
   const [appliedCoupon, setAppliedCoupon] = useState(null)
 
@@ -96,6 +95,31 @@ function App() {
     } catch (err) { showNotify("ผิดพลาด", "error"); }
   }
 
+  // --- Auth Function ---
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    if (isSignUp) {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) return showNotify(error.message, "error");
+      
+      // สร้าง Profile ให้อัตโนมัติในฐานข้อมูล
+      if (data.user) {
+        await supabase.from('profiles').insert([
+          { id: data.user.id, email: email, role: 'customer' }
+        ]);
+      }
+      showNotify("สมัครสมาชิกสำเร็จ! เข้าสู่ระบบได้เลย");
+      setIsSignUp(false); // สลับกลับไปหน้า Login
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) showNotify("อีเมลหรือรหัสผ่านไม่ถูกต้อง", "error");
+      else {
+        showNotify("ยินดีต้อนรับ!");
+        setView('shop');
+      }
+    }
+  }
+
   if (loading) return <div style={fullCenter}>🚢 LOADING...</div>
 
   const isOwner = profile?.role === 'owner' || user?.email === 'myname789987@gmail.com';
@@ -119,22 +143,27 @@ function App() {
         </div>
       </header>
 
-      {/* 1. Login View - แก้ไขเพิ่มปุ่มลืมรหัสผ่าน */}
+      {/* 1. Login/Sign Up View */}
       {view === 'login' && !user && (
         <div style={fullCenter}>
           <div style={loginBoxS}>
-            <h2 style={{color: '#0066cc', marginBottom: '20px'}}>Login</h2>
-            <form onSubmit={(e) => { e.preventDefault(); supabase.auth.signInWithPassword({ email, password }).then(({error}) => error ? showNotify("อีเมลหรือรหัสผ่านไม่ถูกต้อง","error") : setView('shop')) }}>
+            <h2 style={{color: '#0066cc', marginBottom: '20px'}}>{isSignUp ? 'สมัครสมาชิก' : 'Login'}</h2>
+            <form onSubmit={handleAuth}>
               <input type="email" placeholder="Email" style={inputS} value={email} onChange={e=>setEmail(e.target.value)} required />
-              <input type="password" placeholder="Password" style={inputS} value={password} onChange={e=>setPassword(e.target.value)} required />
-              <button type="submit" style={btnBlueLarge}>Login</button>
+              <input type="password" placeholder="Password (6 ตัวขึ้นไป)" style={inputS} value={password} onChange={e=>setPassword(e.target.value)} required />
+              <button type="submit" style={btnBlueLarge}>{isSignUp ? 'ยืนยันการสมัคร' : 'Login'}</button>
               
-              {/* ปุ่มลืมรหัสผ่านที่เพิ่มเข้าไป */}
-              <p onClick={() => { 
-                if(!email) return showNotify("กรุณากรอกอีเมลก่อน","error"); 
-                supabase.auth.resetPasswordForEmail(email); 
-                showNotify("ส่งลิงก์รีเซ็ตไปที่อีเมลแล้ว"); 
-              }} style={forgotText}>ลืมรหัสผ่าน?</p>
+              <p onClick={() => setIsSignUp(!isSignUp)} style={{...forgotText, textDecoration: 'none', color: '#666'}}>
+                {isSignUp ? 'มีบัญชีอยู่แล้ว? เข้าสู่ระบบ' : 'ยังไม่มีบัญชี? สมัครสมาชิกที่นี่'}
+              </p>
+
+              {!isSignUp && (
+                <p onClick={() => { 
+                  if(!email) return showNotify("กรุณากรอกอีเมลก่อน","error"); 
+                  supabase.auth.resetPasswordForEmail(email); 
+                  showNotify("ส่งลิงก์รีเซ็ตไปที่อีเมลแล้ว"); 
+                }} style={forgotText}>ลืมรหัสผ่าน?</p>
+              )}
               
               <button type="button" onClick={() => setView('shop')} style={btnText}>กลับหน้าร้าน</button>
             </form>
@@ -142,7 +171,7 @@ function App() {
         </div>
       )}
 
-      {/* 2. Owner View - ดูสลิปได้ */}
+      {/* 2. Owner View */}
       {view === 'management' && isOwner && (
         <div style={{ maxWidth: '800px', margin: '0 auto' }}>
           <div style={revenueBox}>
@@ -154,17 +183,14 @@ function App() {
             <div key={o.id} style={boxS}>
               <div style={{display:'flex', justifyContent:'space-between'}}><b>#{o.id.slice(0,5)}</b> <b>{o.total_price} ฿</b></div>
               <p style={{fontSize:'13px', color: o.status === 'สำเร็จ' ? 'green' : 'orange', margin: '10px 0'}}>สถานะ: {o.status}</p>
-              
-              {/* ตรวจสอบลิงก์สลิป */}
               {o.slip_url && <a href={o.slip_url} target="_blank" rel="noreferrer" style={slipLink}>🖼️ ดูสลิปโอนเงิน</a>}
-              
               {o.status !== 'สำเร็จ' && <button onClick={()=>confirmOrder(o.id)} style={btnGreenSmall}>ยืนยันสำเร็จ</button>}
             </div>
           ))}
         </div>
       )}
 
-      {/* 3. Admin View - ดูสลิปได้ (View Only) */}
+      {/* 3. Admin View */}
       {view === 'admin' && isAdmin && (
         <div style={{ maxWidth: '800px', margin: '0 auto' }}>
           <h3 style={sectionTitle}>🛡️ รายการสั่งซื้อ (Admin View)</h3>
@@ -235,7 +261,7 @@ function App() {
   )
 }
 
-// --- Styles ---
+// --- Styles (คงเดิม) ---
 const toast = (type) => ({ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', padding: '12px 25px', borderRadius: '25px', color: 'white', backgroundColor: type === 'error' ? '#e63946' : '#28a745', zIndex: 1000 });
 const headerS = { background: 'white', padding: '20px', borderRadius: '25px', marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' };
 const btnMenu = { background: '#f0f2f5', border: 'none', padding: '10px 15px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' };
