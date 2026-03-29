@@ -1,0 +1,16 @@
+/* index.css */
+:root {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #f4f7f6;
+  color: #333;
+}
+
+body {
+  margin: 0;
+  display: block;
+}
+
+#root {
+  width: 100%;
+  margin: 0;
+}
