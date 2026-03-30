@@ -15,15 +15,13 @@ function App() {
   const [notify, setNotify] = useState({ msg: '', type: '' }) 
   const [loading, setLoading] = useState(true)
 
-  // Data State
   const [allOrders, setAllOrders] = useState([])
   const [myOrders, setMyOrders] = useState([])
   const [coupons, setCoupons] = useState([])
   
-  // Input State
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isSignUp, setIsSignUp] = useState(false) // **เพิ่มสำหรับสลับหน้าสมัครสมาชิก**
+  const [isSignUp, setIsSignUp] = useState(false)
   const [slipFile, setSlipFile] = useState(null)
   const [appliedCoupon, setAppliedCoupon] = useState(null)
 
@@ -59,7 +57,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if ((view === 'management' || view === 'admin' || view === 'cart')) { 
+    if (view === 'admin' || view === 'cart') { 
         fetchCoupons(); 
         fetchAllOrders();
     }
@@ -72,7 +70,35 @@ function App() {
   async function fetchAllOrders() { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); setAllOrders(data || []); }
   async function fetchMyOrders(uid) { const { data } = await supabase.from('orders').select('*').eq('user_id', uid).order('created_at', { ascending: false }); setMyOrders(data || []); }
 
-  const totalRevenue = allOrders.filter(o => o.status === 'สำเร็จ').reduce((sum, o) => sum + (o.total_price || 0), 0);
+  // --- Admin Logic ---
+  const addProduct = async () => {
+    const name = prompt("ชื่อสินค้า:");
+    const price = parseInt(prompt("ราคา:"));
+    const img = prompt("ลิงก์รูปภาพ:");
+    if (name && price && img) {
+      await supabase.from('products').insert([{ name, price: price, image_url: img }]);
+      fetchProducts();
+      showNotify("เพิ่มสินค้าสำเร็จ");
+    }
+  }
+
+  const deleteProduct = async (id) => {
+    if(confirm("ลบสินค้านี้?")) {
+      await supabase.from('products').delete().eq('id', id);
+      fetchProducts();
+      showNotify("ลบสำเร็จ", "error");
+    }
+  }
+
+  const addCoupon = async () => {
+    const code = prompt("รหัสคูปอง:");
+    const disc = parseInt(prompt("ส่วนลด (บาท):"));
+    if (code && disc) {
+      await supabase.from('coupons').insert([{ code, discount_amount: disc }]);
+      fetchCoupons();
+      showNotify("เพิ่มคูปองสำเร็จ");
+    }
+  }
 
   const confirmOrder = async (orderId) => {
     await supabase.from('orders').update({ status: 'สำเร็จ' }).eq('id', orderId);
@@ -95,35 +121,26 @@ function App() {
     } catch (err) { showNotify("ผิดพลาด", "error"); }
   }
 
-  // --- Auth Function ---
   const handleAuth = async (e) => {
     e.preventDefault();
     if (isSignUp) {
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) return showNotify(error.message, "error");
-      
-      // สร้าง Profile ให้อัตโนมัติในฐานข้อมูล
-      if (data.user) {
-        await supabase.from('profiles').insert([
-          { id: data.user.id, email: email, role: 'customer' }
-        ]);
-      }
-      showNotify("สมัครสมาชิกสำเร็จ! เข้าสู่ระบบได้เลย");
-      setIsSignUp(false); // สลับกลับไปหน้า Login
+      if (data.user) await supabase.from('profiles').insert([{ id: data.user.id, email: email, role: 'customer' }]);
+      showNotify("สมัครสำเร็จ! เข้าสู่ระบบได้เลย");
+      setIsSignUp(false);
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) showNotify("อีเมลหรือรหัสผ่านไม่ถูกต้อง", "error");
-      else {
-        showNotify("ยินดีต้อนรับ!");
-        setView('shop');
-      }
+      else { showNotify("ยินดีต้อนรับ!"); setView('shop'); }
     }
   }
 
   if (loading) return <div style={fullCenter}>🚢 LOADING...</div>
 
-  const isOwner = profile?.role === 'owner' || user?.email === 'myname789987@gmail.com';
-  const isAdmin = profile?.role === 'admin';
+  // --- เช็คสิทธิ์ Admin/Owner ---
+  const isOwner = user?.email === 'myname789987@gmail.com' || profile?.role === 'owner';
+  const isAdmin = profile?.role === 'admin' || isOwner;
 
   return (
     <div style={{ padding: '15px', backgroundColor: '#f4f7f6', minHeight: '100vh', fontFamily: 'sans-serif' }}>
@@ -131,80 +148,57 @@ function App() {
 
       <header style={headerS}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-          <h2 onClick={() => setView('shop')} style={{cursor:'pointer', color:'#0066cc', margin:0}}>🚢 SEAFOOD {profile?.name}</h2>
+          <h2 onClick={() => setView('shop')} style={{cursor:'pointer', color:'#0066cc', margin:0}}>🚢 SEAFOOD {profile?.name || ''}</h2>
           {user ? <button onClick={() => supabase.auth.signOut()} style={btnLogoutS}>Logout</button> : <button onClick={() => setView('login')} style={btnBlueSmall}>Login</button>}
         </div>
         <div style={{display:'flex', gap:'10px', marginTop:'15px', overflowX:'auto'}}>
           <button onClick={() => setView('shop')} style={view === 'shop' ? btnMenuAc : btnMenu}>หน้าร้าน</button>
           <button onClick={() => setView('cart')} style={view === 'cart' ? btnMenuAc : btnMenu}>🛒 ตะกร้า ({cart.length})</button>
           <button onClick={() => setView('profile')} style={view === 'profile' ? btnMenuAc : btnMenu}>📜 ประวัติ</button>
-          {isOwner && <button onClick={() => setView('management')} style={btnOwner}>📊 การจัดการ</button>}
-          {isAdmin && <button onClick={() => setView('admin')} style={{...btnMenu, color:'#555'}}>🛡️ Admin</button>}
+          {(isOwner || isAdmin) && <button onClick={() => setView('admin')} style={view === 'admin' ? btnMenuAc : btnOwner}>⚙️ จัดการร้าน</button>}
         </div>
       </header>
 
-      {/* 1. Login/Sign Up View */}
-      {view === 'login' && !user && (
-        <div style={fullCenter}>
-          <div style={loginBoxS}>
-            <h2 style={{color: '#0066cc', marginBottom: '20px'}}>{isSignUp ? 'สมัครสมาชิก' : 'Login'}</h2>
-            <form onSubmit={handleAuth}>
-              <input type="email" placeholder="Email" style={inputS} value={email} onChange={e=>setEmail(e.target.value)} required />
-              <input type="password" placeholder="Password (6 ตัวขึ้นไป)" style={inputS} value={password} onChange={e=>setPassword(e.target.value)} required />
-              <button type="submit" style={btnBlueLarge}>{isSignUp ? 'ยืนยันการสมัคร' : 'Login'}</button>
-              
-              <p onClick={() => setIsSignUp(!isSignUp)} style={{...forgotText, textDecoration: 'none', color: '#666'}}>
-                {isSignUp ? 'มีบัญชีอยู่แล้ว? เข้าสู่ระบบ' : 'ยังไม่มีบัญชี? สมัครสมาชิกที่นี่'}
-              </p>
-
-              {!isSignUp && (
-                <p onClick={() => { 
-                  if(!email) return showNotify("กรุณากรอกอีเมลก่อน","error"); 
-                  supabase.auth.resetPasswordForEmail(email); 
-                  showNotify("ส่งลิงก์รีเซ็ตไปที่อีเมลแล้ว"); 
-                }} style={forgotText}>ลืมรหัสผ่าน?</p>
-              )}
-              
-              <button type="button" onClick={() => setView('shop')} style={btnText}>กลับหน้าร้าน</button>
-            </form>
+      {/* --- View: Admin/Owner --- */}
+      {view === 'admin' && (isOwner || isAdmin) && (
+        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+          <h3 style={sectionTitle}>⚙️ ระบบจัดการร้านค้า</h3>
+          <div style={boxS}>
+            <h4>📦 สินค้า</h4>
+            <button onClick={addProduct} style={btnBlueSmall}>+ เพิ่มสินค้า</button>
+            <div style={{marginTop:'10px'}}>
+              {products.map(p => (
+                <div key={p.id} style={itemRow}>
+                  <span>{p.name} ({p.price}฿)</span>
+                  <button onClick={() => deleteProduct(p.id)} style={{color:'red', border:'none', background:'none', cursor:'pointer'}}>ลบ</button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={boxS}>
+            <h4>🎟️ คูปอง</h4>
+            <button onClick={addCoupon} style={btnBlueSmall}>+ เพิ่มคูปอง</button>
+            <div style={{marginTop:'10px'}}>
+              {coupons.map(c => (
+                <div key={c.id} style={itemRow}><span>{c.code} (-{c.discount_amount}฿)</span></div>
+              ))}
+            </div>
+          </div>
+          <div style={boxS}>
+            <h4>📋 ออเดอร์ทั้งหมด</h4>
+            {allOrders.map(o => (
+              <div key={o.id} style={{borderBottom:'1px solid #eee', padding:'10px 0'}}>
+                <div style={{display:'flex', justifyContent:'space-between'}}><b>#{o.id.slice(0,5)}</b> <b>{o.total_price} ฿</b></div>
+                <p style={{fontSize:'12px', color: o.status === 'สำเร็จ' ? 'green' : 'orange'}}>สถานะ: {o.status}</p>
+                {o.slip_url && <a href={o.slip_url} target="_blank" rel="noreferrer" style={slipLink}>ดูสลิป</a>}
+                {isOwner && o.status !== 'สำเร็จ' && <button onClick={()=>confirmOrder(o.id)} style={btnGreenSmall}>ยืนยันชำระเงิน</button>}
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* 2. Owner View */}
-      {view === 'management' && isOwner && (
-        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-          <div style={revenueBox}>
-            <p style={{ margin: 0, fontSize: '14px', color: '#666' }}>💰 ยอดขายรวม (สำเร็จแล้ว)</p>
-            <h1 style={{ margin: '5px 0 0 0', color: '#28a745' }}>{totalRevenue.toLocaleString()} ฿</h1>
-          </div>
-          <h3 style={sectionTitle}>📋 รายการสั่งซื้อ (Owner)</h3>
-          {allOrders.map(o => (
-            <div key={o.id} style={boxS}>
-              <div style={{display:'flex', justifyContent:'space-between'}}><b>#{o.id.slice(0,5)}</b> <b>{o.total_price} ฿</b></div>
-              <p style={{fontSize:'13px', color: o.status === 'สำเร็จ' ? 'green' : 'orange', margin: '10px 0'}}>สถานะ: {o.status}</p>
-              {o.slip_url && <a href={o.slip_url} target="_blank" rel="noreferrer" style={slipLink}>🖼️ ดูสลิปโอนเงิน</a>}
-              {o.status !== 'สำเร็จ' && <button onClick={()=>confirmOrder(o.id)} style={btnGreenSmall}>ยืนยันสำเร็จ</button>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 3. Admin View */}
-      {view === 'admin' && isAdmin && (
-        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-          <h3 style={sectionTitle}>🛡️ รายการสั่งซื้อ (Admin View)</h3>
-          {allOrders.map(o => (
-            <div key={o.id} style={boxS}>
-              <div style={{display:'flex', justifyContent:'space-between'}}><b>#{o.id.slice(0,5)}</b> <b>{o.total_price} ฿</b></div>
-              <p style={{fontSize:'13px', color: o.status === 'สำเร็จ' ? 'green' : 'orange', margin: '10px 0'}}>สถานะ: {o.status}</p>
-              {o.slip_url && <a href={o.slip_url} target="_blank" rel="noreferrer" style={slipLink}>🖼️ ดูสลิปโอนเงิน</a>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 4. หน้าร้าน */}
+      {/* --- View: Shop --- */}
       {view === 'shop' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '20px' }}>
           {products.map(p => (
@@ -217,71 +211,85 @@ function App() {
         </div>
       )}
 
-      {/* 5. ตะกร้าสินค้า */}
+      {/* --- View: Login/Sign Up --- */}
+      {view === 'login' && !user && (
+        <div style={fullCenter}>
+          <div style={loginBoxS}>
+            <h2 style={{color: '#0066cc'}}>{isSignUp ? 'สมัครสมาชิก' : 'Login'}</h2>
+            <form onSubmit={handleAuth}>
+              <input type="email" placeholder="Email" style={inputS} value={email} onChange={e=>setEmail(e.target.value)} required />
+              <input type="password" placeholder="Password (6 ตัวขึ้นไป)" style={inputS} value={password} onChange={e=>setPassword(e.target.value)} required />
+              <button type="submit" style={btnBlueLarge}>{isSignUp ? 'ยืนยันการสมัคร' : 'Login'}</button>
+              <p onClick={() => setIsSignUp(!isSignUp)} style={{fontSize:'12px', cursor:'pointer', marginTop:'10px'}}>
+                {isSignUp ? 'มีบัญชีแล้ว? เข้าสู่ระบบ' : 'ไม่มีบัญชี? สมัครที่นี่'}
+              </p>
+              <button type="button" onClick={() => setView('shop')} style={btnText}>กลับหน้าร้าน</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- View: Cart --- */}
       {view === 'cart' && (
         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
           <h3 style={sectionTitle}>🛒 ตะกร้าสินค้า</h3>
           <div style={boxS}>
             {cart.map((item, idx) => <div key={idx} style={itemRow}><span>{item.name}</span><b>{item.price} ฿</b></div>)}
-            {cart.length > 0 && (
+            {cart.length > 0 ? (
               <div style={{marginTop:'20px', borderTop:'1px solid #eee', paddingTop:'15px'}}>
-                <p style={{fontSize:'14px', fontWeight:'bold'}}>🎟️ เลือกส่วนลด:</p>
-                <div style={{display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'15px'}}>
+                <p>🎟️ เลือกส่วนลด:</p>
+                <div style={{display:'flex', gap:'8px', marginBottom:'15px', overflowX:'auto'}}>
                   {coupons.map(c => (
-                    <button key={c.id} onClick={() => { setAppliedCoupon(c); showNotify(`ใช้คูปอง ${c.code} แล้ว`); }}
-                      style={{ padding:'8px 12px', borderRadius:'10px', fontSize:'12px', cursor:'pointer', border: appliedCoupon?.id === c.id ? '2px solid #0066cc' : '1px solid #ddd', background: appliedCoupon?.id === c.id ? '#e1f0ff' : 'white' }}>
-                      <b>{c.code}</b> (-{c.discount_amount}฿)
+                    <button key={c.id} onClick={() => { setAppliedCoupon(c); showNotify(`ใช้คูปอง ${c.code}`); }}
+                      style={{ padding:'8px', borderRadius:'10px', fontSize:'12px', background: appliedCoupon?.id === c.id ? '#e1f0ff' : 'white' }}>
+                      {c.code} (-{c.discount_amount}฿)
                     </button>
                   ))}
-                  {appliedCoupon && <button onClick={()=>setAppliedCoupon(null)} style={{background:'none', border:'none', color:'#999', fontSize:'11px', cursor:'pointer'}}>ยกเลิก</button>}
                 </div>
                 <h3 style={{color:'#e63946', textAlign:'right'}}>สุทธิ: {Math.max(0, totalPrice - (appliedCoupon?.discount_amount || 0))} ฿</h3>
-                <p style={{fontSize:'12px', marginTop:'15px'}}>📸 แนบสลิปโอนเงิน:</p>
-                <input type="file" onChange={e=>setSlipFile(e.target.files[0])} disabled={!user} />
+                <input type="file" onChange={e=>setSlipFile(e.target.files[0])} style={{marginTop:'10px'}} />
                 <button onClick={handleCheckout} style={{...btnBlue, background: user ? '#28a745' : '#ccc', marginTop:'15px'}}>ยืนยันสั่งซื้อ</button>
               </div>
-            )}
+            ) : <p>ไม่มีสินค้าในตะกร้า</p>}
           </div>
         </div>
       )}
 
-      {/* 6. ประวัติ */}
+      {/* --- View: Profile --- */}
       {view === 'profile' && (
         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
           <h3 style={sectionTitle}>📜 ประวัติสั่งซื้อ</h3>
-          {myOrders.map(o => (
+          {myOrders.length > 0 ? myOrders.map(o => (
             <div key={o.id} style={boxS}>
               <div style={{display:'flex', justifyContent:'space-between'}}><span>#{o.id.slice(0,8)}</span><b>{o.total_price} ฿</b></div>
-              <p style={{fontSize:'14px', color: o.status === 'สำเร็จ' ? 'green' : 'orange'}}>สถานะ: {o.status}</p>
+              <p style={{color: o.status === 'สำเร็จ' ? 'green' : 'orange'}}>สถานะ: {o.status}</p>
             </div>
-          ))}
+          )) : <p>ยังไม่มีประวัติการสั่งซื้อ</p>}
         </div>
       )}
     </div>
   )
 }
 
-// --- Styles (คงเดิม) ---
+// --- Styles ---
 const toast = (type) => ({ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', padding: '12px 25px', borderRadius: '25px', color: 'white', backgroundColor: type === 'error' ? '#e63946' : '#28a745', zIndex: 1000 });
 const headerS = { background: 'white', padding: '20px', borderRadius: '25px', marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' };
 const btnMenu = { background: '#f0f2f5', border: 'none', padding: '10px 15px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' };
 const btnMenuAc = { ...btnMenu, background: '#e1f0ff', color: '#0066cc' };
 const btnOwner = { ...btnMenu, background: '#fff9e6', color: '#d4af37' };
 const boxS = { background: 'white', padding: '20px', borderRadius: '25px', marginBottom:'10px' };
-const revenueBox = { background: 'white', padding: '20px', borderRadius: '25px', marginBottom: '20px', textAlign: 'center' };
 const sectionTitle = { borderLeft: '6px solid #0066cc', paddingLeft: '12px', fontWeight: 'bold', fontSize:'20px', marginBottom:'15px' };
 const inputS = { width:'100%', padding: '12px', borderRadius: '12px', border: '1px solid #ddd', boxSizing:'border-box', marginBottom: '10px' };
 const btnBlueLarge = { width: '100%', padding: '12px', borderRadius: '12px', background: '#0066cc', color: 'white', border:'none', cursor:'pointer' };
-const forgotText = { fontSize: '12px', color: '#0066cc', cursor: 'pointer', marginTop: '15px', textDecoration: 'underline' };
 const slipLink = { fontSize:'12px', color:'#0066cc', textDecoration:'underline', display:'block', marginBottom:'10px' };
-const btnGreenSmall = { background: '#28a745', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '10px', cursor: 'pointer' };
+const btnGreenSmall = { background: '#28a745', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '10px', cursor: 'pointer', marginTop:'5px' };
 const btnBlue = { width: '100%', padding: '12px', borderRadius: '12px', background: '#0066cc', color: 'white', border:'none', fontWeight:'bold', cursor:'pointer' };
 const btnBlueSmall = { padding: '8px 15px', borderRadius: '10px', background: '#0066cc', color: 'white', border:'none', cursor:'pointer' };
 const btnLogoutS = { color: '#e63946', border: '1px solid #e63946', background: 'none', padding: '8px 15px', borderRadius: '12px', cursor:'pointer' };
 const loginBoxS = { background: 'white', padding: '40px', borderRadius: '30px', width: '320px', textAlign: 'center' };
 const btnText = { background: 'none', border: 'none', color: '#666', marginTop: '15px', cursor: 'pointer' };
 const fullCenter = { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh', flexDirection:'column' };
-const itemRow = { display: 'flex', justifyContent: 'space-between', padding: '10px 0' };
+const itemRow = { display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom:'1px solid #eee' };
 const cardS = { background: 'white', padding: '15px', borderRadius: '25px', textAlign: 'center' };
 const imgS = { width: '100%', height: '100px', objectFit: 'cover', borderRadius: '15px' };
 
